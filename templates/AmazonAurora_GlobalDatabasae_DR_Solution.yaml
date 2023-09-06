@@ -1,0 +1,1048 @@
+# *
+# * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# * SPDX-License-Identifier: MIT-0
+# *
+# * Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# * software and associated documentation files (the "Software"), to deal in the Software
+# * without restriction, including without limitation the rights to use, copy, modify,
+# * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# * permit persons to whom the Software is furnished to do so.
+# *
+# * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# *
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploying Aurora Global Database Cluster for Disaster Recovery Solution
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: General Information 
+        Parameters:
+          - NotificationEmailAddress
+          - HeadlessCluster
+      - Label:
+          default: Global Region
+        Parameters:
+          - GlobalDatabaseIdentifier
+      - Label:
+          default: Primary Region
+        Parameters:
+          - PrimaryClusterIdentifier
+          - DashboardNamePrefix
+      - Label:
+          default: Secondary Region
+        Parameters:
+          - SecondaryRegionName
+          - SecondaryDBSubnetID
+          - SecondarySecurityGroupID
+          - SecondaryEncryptionKeyAlias
+          - SecondaryClusterIdentifier
+          - SecondaryInstanceIdentifier
+          - SecondaryClusterParameterGroup
+          - SecondaryDBParameterGroup
+  Comments: ''
+  
+Parameters:
+  NotificationEmailAddress:
+    Description: Email address to notify for any alarm
+    Default: "user@domain.com"
+    Type: String
+  HeadlessCluster:
+    Description: No Reader replica in the Secondary Region
+    Default: "No"
+    Type: String
+    AllowedValues: ['Yes','No']
+  PrimaryClusterIdentifier:
+    Description: Name of the Primary cluster identifier
+    Default: "apg-us-east-2"
+    Type: String
+  DashboardNamePrefix:
+    Description: Cloudwatch Dashboard Prefix
+    Default: "agd"
+    Type: String
+  GlobalDatabaseIdentifier:
+    Description: Name of the global database Identifier
+    Default: "apgglobaldbserver"
+    Type: String
+  SecondaryRegionName:
+    Description: Secondary Region name
+    Default: "us-west-2"
+    Type: String
+    AllowedValues: ['us-east-2', 'us-east-1', 'us-west-1', 'us-west-2', 'af-south-1', 'ap-east-1', 'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'ap-south-1', 'ap-northeast-3', 'ap-northeast-2', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1', 'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-south-1', 'eu-west-3', 'eu-south-2', 'eu-north-1', 'eu-central-2', 'me-south-1', 'me-central-1', 'sa-east-1', 'us-gov-east-1', 'us-gov-west-1']
+  SecondaryDBSubnetID: 
+    Description: Secondary Region Database Subnet Group ID
+    Default: "dbsubnetgroup"
+    Type: String
+  SecondarySecurityGroupID:
+    Description: Secondary Region Security Group ID
+    Default: "sg-xxxxx"
+    Type: String
+  SecondaryEncryptionKeyAlias:
+    Description: Secondary Region Encryption Key Alias Name
+    Default: "dbkmskey"
+    Type: String
+  SecondaryClusterIdentifier:
+    Description: Secondary Region Cluster Identifier
+    Default: "apg-us-west-2"
+    Type: String
+  SecondaryInstanceIdentifier:
+    Description: Secondary Region Instance Identifier
+    Default: "apg-us-west-2-instance01"
+    Type: String
+  SecondaryClusterParameterGroup:
+    Description: Secondary Region Cluster Parameter Group
+    Default: "default"
+    Type: String
+  SecondaryDBParameterGroup:
+    Description: Secondary Region Database Parameter Group
+    Default: "default"
+    Type: String
+
+Resources:
+
+  GatherInfo:
+    Type: Custom::GatherInfo
+    Properties:
+      ServiceToken: !GetAtt 'GatherInfoLambda.Arn'
+      PrimaryClusterIdentifier: !Ref PrimaryClusterIdentifier
+      SecondaryClusterIdentifier: !Ref SecondaryClusterIdentifier
+      PrimaryRegionName: !Ref AWS::Region
+      SecondaryRegionName: !Ref SecondaryRegionName
+      GlobalDatabaseIdentifier: !Ref GlobalDatabaseIdentifier
+      SecondaryDBSubnetID: !Ref SecondaryDBSubnetID
+      SecondarySecurityGroupID: !Ref SecondarySecurityGroupID
+      SecondaryClusterParameterGroup: !Ref SecondaryClusterParameterGroup
+      SecondaryDBParameterGroup: !Ref SecondaryDBParameterGroup
+      SecondaryEncryptionKeyAlias: !Ref SecondaryEncryptionKeyAlias
+      SecondaryInstanceIdentifier: !Ref SecondaryInstanceIdentifier
+
+  GatherInfoRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSKeyManagementServicePowerUser
+        - arn:aws:iam::aws:policy/AmazonRDSReadOnlyAccess
+    
+  GatherInfoLambda:
+    Type: AWS::Lambda::Function
+    # checkov:skip=CKV_AWS_117:Custom resource deployed in default VPC
+    # checkov:skip=CKV_AWS_116:Custom resource. No Dead Letter Queue required
+    Metadata:
+        cfn_nag:
+          rules_to_suppress:
+            - id: W89
+              reason: "Custom resource deployed in default VPC"
+    Properties:
+      Description: Gathers all the information regarding the current Aurora cluster
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt 'GatherInfoRole.Arn'
+      Timeout: 300
+      ReservedConcurrentExecutions: 10
+      Code:
+        ZipFile: |
+          import json
+          import sys
+          import os
+          import urllib.request
+          import cfnresponse
+          import traceback
+          from pip._internal import main
+
+          main(['install', '-I', '-q', 'boto3', '--target', '/tmp/', '--no-cache-dir', '--disable-pip-version-check'])
+          sys.path.insert(0,'/tmp/')
+
+          import boto3
+          from botocore.exceptions import ClientError
+          
+          def print_out(msg,info=None):
+            if info is not None:
+              print("**{}** - {}".format(info,msg))
+            else:
+              print("**** {}".format(msg))
+
+          def validate_secondary_region(param):
+            outData = {}
+            validate_secondary_region_status = True
+            SecondaryDBSubnetID = param['SecondaryDBSubnetID']
+            SecondarySecurityGroupID = param['SecondarySecurityGroupID']
+            SecondaryClusterParameterGroup = param['SecondaryClusterParameterGroup']
+            SecondaryDBParameterGroup = param['SecondaryDBParameterGroup']
+            SecondaryRegionName = param['SecondaryRegionName']
+            SecondaryEncryptionKeyAlias = param['SecondaryEncryptionKeyAlias']
+            SecondaryClusterIdentifier = param['SecondaryClusterIdentifier']
+            SecondaryInstanceIdentifier = param['SecondaryInstanceIdentifier']
+              
+            client = boto3.client("ec2", region_name=SecondaryRegionName)
+            try:
+              response = client.describe_security_groups( GroupIds=[SecondarySecurityGroupID])
+              print_out("Security group ID {} exists on the region {}".format(SecondarySecurityGroupID,SecondaryRegionName))
+            except:
+              print_out(traceback.format_exc())
+              validate_secondary_region_status = False
+              print_out("Security group ID {} does not exists in the region {}".format(SecondarySecurityGroupID,SecondaryRegionName),"ERROR")
+            
+            client = boto3.client("rds", region_name=SecondaryRegionName)
+
+            try:
+              response = client.describe_db_clusters(DBClusterIdentifier=SecondaryClusterIdentifier)
+              validate_secondary_region_status = False
+              print_out("Secondary Cluster identifier {} already exists in region {}".format(SecondaryClusterIdentifier,SecondaryRegionName),"ERROR")
+            except:
+              print_out("Validated Secondary Cluster identifier {} in region {}".format(SecondaryClusterIdentifier,SecondaryRegionName))
+
+            try:
+              response = client.describe_db_instances(DBInstanceIdentifier=SecondaryInstanceIdentifier)
+              validate_secondary_region_status = False
+              print_out("Secondary Instance identifier {} already exists in region {}".format(SecondaryInstanceIdentifier,SecondaryRegionName),"ERROR")
+            except:
+              print_out("Validated Secondary Instance identifier {} in region {}".format(SecondaryInstanceIdentifier,SecondaryRegionName))
+
+            try:
+              response = client.describe_db_subnet_groups(DBSubnetGroupName=SecondaryDBSubnetID)
+              print_out("DB Subnet group {} exists on the region {}".format(SecondaryDBSubnetID,SecondaryRegionName))
+            except:
+              validate_secondary_region_status = False
+              print_out("DB Subnet group {} does not exists in the region {}".format(SecondaryDBSubnetID,SecondaryRegionName),"ERROR")
+            
+            if SecondaryClusterParameterGroup != "default" :
+              try:
+                response = client.describe_db_cluster_parameter_groups(DBClusterParameterGroupName=SecondaryClusterParameterGroup)
+                print_out("Cluster Parameter group {} exists in the region {}".format(SecondaryClusterParameterGroup,SecondaryRegionName))
+              except:
+                validate_secondary_region_status = False
+                print_out("Cluster Parameter group {} does not exists in the region {}".format(SecondaryClusterParameterGroup,SecondaryRegionName),"ERROR")
+            else:
+              print_out("Default Cluster parameter group is provided")
+              
+            if SecondaryDBParameterGroup != "default" :
+              try:
+                response = client.describe_db_cluster_parameter_groups(DBClusterParameterGroupName=SecondaryDBParameterGroup)
+                print_out("DB Parameter group {} exists in the region {}".format(SecondaryDBParameterGroup,SecondaryRegionName))
+              except:
+                validate_secondary_region_status = False
+                print_out("DB Parameter group {} does not exists in the region {}".format(SecondaryDBParameterGroup,SecondaryRegionName),"ERROR")
+            else:
+              print_out("Default DB parameter group is provided")
+              
+            client = boto3.client("kms", region_name=SecondaryRegionName)
+            
+            key_exists = False
+            response = client.list_aliases()
+            for alias in response['Aliases']:
+              if alias['AliasName'] == "{}/{}".format("alias",SecondaryEncryptionKeyAlias):
+                key_exists = True
+                keyId = alias['TargetKeyId']
+                response = client.list_keys()
+                for keys in response['Keys']:
+                  if keys['KeyId'] == keyId:
+                    outData['SecondaryEncryptionKeyARN'] = keys['KeyArn']
+                    break
+                break
+            if key_exists:
+              print_out("KMS Key Alias {} exists in the region {}".format(SecondaryEncryptionKeyAlias,SecondaryRegionName))
+            else:
+              validate_secondary_region_status = False
+              print_out("KMS Key Alias {} does not exists in the region {}".format(SecondaryEncryptionKeyAlias,SecondaryRegionName),"ERROR")
+            
+            return validate_secondary_region_status, outData
+
+          def gather_primary_info(param):
+            
+            data = {}
+            
+            try:
+              PrimaryClusterIdentifier = param['PrimaryClusterIdentifier']
+              GlobalDatabaseIdentifier = param['GlobalDatabaseIdentifier']
+              SecondaryClusterIdentifier = param['SecondaryClusterIdentifier']
+              PrimaryRegionName = param['PrimaryRegionName']
+              
+              client = boto3.client("rds")
+              response = {}
+              
+              data['status'] = True
+              data['PrimaryClusterIdentifier'] = PrimaryClusterIdentifier
+              data['PrimaryRegionName'] = PrimaryRegionName
+              data['SecondaryRegionName'] = param['SecondaryRegionName']
+              
+              try:
+                response = client.describe_db_clusters(DBClusterIdentifier=PrimaryClusterIdentifier)
+                print_out("Primary cluster identifier {} exists in this region".format(PrimaryClusterIdentifier))
+              except:
+                data['status'] = False
+                print_out("No cluster with the name {} exists in this region".format(PrimaryClusterIdentifier),"ERROR")
+                return data
+                
+              cluster_info = response['DBClusters'][0]
+              data['Engine'] = cluster_info['Engine']
+              data['EngineVersion'] = cluster_info['EngineVersion']
+              data['CreatePrimaryMutiAZ'] = "YES"
+              
+              print(cluster_info)
+              if 'ServerlessV2ScalingConfiguration' in cluster_info:
+                print_out("Setting up the V2 scaling configuration")
+                data['MinCapacity']= cluster_info['ServerlessV2ScalingConfiguration']['MinCapacity']
+                data['MaxCapacity']= cluster_info['ServerlessV2ScalingConfiguration']['MaxCapacity']
+              else:
+                data['MinCapacity']= 0
+                data['MaxCapacity']= 0
+
+              if 'BacktrackWindow' in cluster_info :
+                data['status'] = False
+                print_out("Backtrack is enabled on the primary cluster {} which is not supported by Aurora Global Database".format(PrimaryClusterIdentifier), "ERROR")
+                
+              response = client.describe_db_cluster_parameters( DBClusterParameterGroupName=cluster_info['DBClusterParameterGroup'])
+              for param in response['Parameters']:
+                if param['ParameterName'] == "apg_ccm_enabled":
+                  if param.get('ParameterValue',"0") == "1":
+                    data['status'] = False
+                    print_out("Cluster cache management is enabled on the primary cluster {} which is not supported by Aurora Global Database".format(PrimaryClusterIdentifier), "ERROR")
+                
+              if cluster_info['MultiAZ']:
+                data['CreatePrimaryMutiAZ'] = "NO"
+                print_out("Multi-AZ is already enabled in the cluster. Will skip creating additional reader instance")
+              else:
+                print_out("Multi-AZ is not enabled in the cluster. Reader instance will be created in another AZ")
+                  
+              writer_instance_name = ""
+              for instances in cluster_info['DBClusterMembers']:
+                if instances['IsClusterWriter'] :
+                  writer_instance_name = instances['DBInstanceIdentifier']
+              
+              if not writer_instance_name :
+                data['status'] = False
+                print_out("Unable to determine the writer instance in this region".format(PrimaryClusterIdentifier),"ERROR")
+                return data
+                  
+              response = client.describe_db_instances(DBInstanceIdentifier=writer_instance_name)
+                  
+              instance_info = response['DBInstances'][0]
+              data['WriterInstanceClass'] = instance_info['DBInstanceClass']
+              if data['WriterInstanceClass'] == "db.serverless":
+                data['WriterServerlessV2'] = "YES"
+              else: 
+                data['WriterServerlessV2'] = "NO"
+                data['MinCapacity'] = 0 
+                data['MaxCapacity'] = 0 
+
+              data['WriterAZ'] = instance_info['AvailabilityZone']
+              data['WriterParameterGroup'] = instance_info['DBParameterGroups'][0]['DBParameterGroupName']
+              data['ReaderInstanceName'] = "{}-01".format(writer_instance_name)
+              list_subnets= []
+              for subnets in instance_info['DBSubnetGroup']['Subnets']:
+                if subnets['SubnetStatus'] == "Active":
+                  if subnets['SubnetAvailabilityZone']['Name'] != data['WriterAZ'] :
+                    list_subnets.append(subnets['SubnetAvailabilityZone']['Name'])
+                
+              data['ReaderAZ'] = list_subnets[0] 
+              
+              response = client.describe_orderable_db_instance_options(
+                Engine=data['Engine'],
+                EngineVersion=data['EngineVersion'],
+                DBInstanceClass=data['WriterInstanceClass'] )
+                
+              if not response['OrderableDBInstanceOptions'][0]['SupportsGlobalDatabases']:
+                data['status'] = False
+                print_out("Current Primary instance type {} is not supported for Aurora Global Database.".format(data['WriterInstanceClass']),"ERROR")
+                return data
+              else:
+                print_out("Current Primary instance type {} is supported for Aurora Global Database.".format(data['WriterInstanceClass']))
+              return data
+
+            except Exception as error:
+              print_out("Exception occurred {}".format(traceback.print_exc()),"ERROR")
+              data['status'] = False
+              return data
+                
+          def validate_global_database(param,data):
+            validate_global_database_status = True
+            GlobalDatabaseIdentifier = param['GlobalDatabaseIdentifier']
+            PrimaryRegionName = param['PrimaryRegionName']
+
+            try:
+              client = boto3.client("rds", region_name = PrimaryRegionName)
+              response = client.describe_global_clusters( GlobalClusterIdentifier=GlobalDatabaseIdentifier)
+              if len(response['GlobalClusters']) == 1 :
+                print_out("Global Database Cluster identifier {} already exists in the current region {}".format(GlobalDatabaseIdentifier,PrimaryRegionName),"ERROR")
+                validate_global_database_status = False
+              else:
+                print_out("Validated Global Database Cluster identifier name {} in the current region {}".format(GlobalDatabaseIdentifier,PrimaryRegionName))
+            except:
+                print_out("Validated Global Database Cluster identifier name {} in the current region {}".format(GlobalDatabaseIdentifier,PrimaryRegionName))
+
+            for region in [param['PrimaryRegionName'], param['SecondaryRegionName']]:           
+              client = boto3.client("rds", region_name = region)
+              response = client.describe_db_engine_versions(Engine=data['Engine'], EngineVersion=data['EngineVersion'])
+              if len(response['DBEngineVersions']) == 0 :
+                print_out("Region {} does not support the current version of the engine {} with the version {}".format(region,data['Engine'], data['EngineVersion']), "ERROR")
+                validate_global_database_status = False
+              else:
+                if response['DBEngineVersions'][0]['SupportsGlobalDatabases'] :
+                  print_out("Region {} supports Global database for the current version of the engine {} with the version {}".format(region,data['Engine'], data['EngineVersion']))
+                else:
+                  validate_global_database_status = False
+                  print_out("Region {} does not supports Global database for the current version of the engine {} with the version {}".format(region,data['Engine'], data['EngineVersion']), "ERROR")
+                  
+            return validate_global_database_status
+            
+          def lambda_handler(event, context):
+              print ("Input event: {}".format(event))
+              overall_status = True
+              status = cfnresponse.SUCCESS
+              data = {}
+              key_name = "GatherInfo"
+              
+              if event['RequestType'] != "Create":
+                data = {"Success": "Skiping the execution for non-create events"}
+                cfnresponse.send(event, context, status, data, key_name, noEcho=True)
+                return
+
+              print("=====================================================================================")
+              try:
+                data = gather_primary_info(event['ResourceProperties'])
+                if not data['status'] :
+                  overall_status = False
+                
+                validate_global_database_status = validate_global_database(event['ResourceProperties'],data)
+                if not validate_global_database_status :
+                  overall_status = False
+                
+                validate_secondary_region_status, outData = validate_secondary_region(event['ResourceProperties'])
+                if not validate_secondary_region_status :
+                  overall_status = False
+                else:
+                  data['SecondaryEncryptionKeyARN'] = outData['SecondaryEncryptionKeyARN']
+              except:
+                overall_status = False
+                print_out("Exception occurred {}".format(traceback.print_exc()),"ERROR")
+              print_out("Overall status is {}".format(overall_status))
+
+              print("=====================================================================================")
+              
+              if not overall_status :
+                status = cfnresponse.FAILED
+                
+              key_name = data['PrimaryClusterIdentifier']
+                
+              cfnresponse.send(event, context, status, data, key_name, noEcho=True)
+
+  AGDProvision:
+    DependsOn: GatherInfo
+    Type: AWS::RDS::GlobalCluster
+    Properties: 
+      GlobalClusterIdentifier: !Ref GlobalDatabaseIdentifier
+      SourceDBClusterIdentifier: !Ref PrimaryClusterIdentifier
+  
+
+  AGDPrimaryMultiAZInstance:
+    Type: AWS::CloudFormation::StackSet
+    DependsOn: 
+      - AGDProvision
+    Properties:
+      AdministrationRoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSCloudFormationStackSetAdministrationRole"
+      ExecutionRoleName:  AWSCloudFormationStackSetExecutionRole
+      CallAs: SELF
+      Capabilities:
+        - CAPABILITY_IAM
+        - CAPABILITY_AUTO_EXPAND
+        - CAPABILITY_NAMED_IAM
+      Description: Enabling Multi-AZ in the Primary region
+      OperationPreferences:
+        FailureToleranceCount: 0
+        MaxConcurrentCount: 2
+        RegionConcurrencyType: PARALLEL
+      Parameters:
+        - ParameterKey: WriterInstanceClass
+          ParameterValue: !GetAtt GatherInfo.WriterInstanceClass
+        - ParameterKey: ReaderInstanceName
+          ParameterValue: !GetAtt GatherInfo.ReaderInstanceName
+        - ParameterKey: Engine
+          ParameterValue: !GetAtt GatherInfo.Engine
+        - ParameterKey: PrimaryClusterIdentifier
+          ParameterValue: !Ref PrimaryClusterIdentifier
+        - ParameterKey: ReaderAZ
+          ParameterValue: !GetAtt GatherInfo.ReaderAZ
+        - ParameterKey: PrimaryRegionName
+          ParameterValue: !Ref AWS::Region
+        - ParameterKey: CreatePrimaryMutiAZ
+          ParameterValue: !GetAtt GatherInfo.CreatePrimaryMutiAZ
+      PermissionModel: SELF_MANAGED
+      StackInstancesGroup:
+        - DeploymentTargets:
+            Accounts:
+              - !Ref 'AWS::AccountId'
+          Regions:
+            - !Ref AWS::Region
+      StackSetName: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - AGDPrimaryMultiAZInstance
+      TemplateBody: |
+
+        Parameters:
+          WriterInstanceClass:
+            Description: WriterInstanceClass
+            Type: String
+          ReaderInstanceName:
+            Description : ReaderInstanceName
+            Type: String
+          Engine:
+            Description: Engine Type
+            Type: String
+          PrimaryClusterIdentifier:
+            Description: PrimaryClusterIdentifier
+            Type: String
+          ReaderAZ:
+            Description: ReaderAZ
+            Type: String
+          PrimaryRegionName:
+            Description: Primary Region Name
+            Type: String
+          CreatePrimaryMutiAZ:
+            Description: CreatePrimaryMutiAZ
+            Type: String
+        Conditions:
+          PrimaryMultiAZNotExists: !Equals [ !Ref CreatePrimaryMutiAZ, "YES" ]
+        Resources:
+          AuroraMultiAZInstance:
+            Condition: PrimaryMultiAZNotExists
+            Type: AWS::RDS::DBInstance
+            Properties:
+              DBInstanceClass: !Ref WriterInstanceClass
+              DBInstanceIdentifier: !Ref ReaderInstanceName
+              DBClusterIdentifier: !Ref PrimaryClusterIdentifier
+              AvailabilityZone: !Ref ReaderAZ
+              Engine: !Ref Engine
+
+
+  AGDSecondaryRegionCluster:
+    Type: AWS::CloudFormation::StackSet
+    DependsOn: 
+      - GatherInfo
+      - AGDProvision
+      - AGDPrimaryMultiAZInstance
+    Properties:
+      AdministrationRoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSCloudFormationStackSetAdministrationRole"
+      ExecutionRoleName:  AWSCloudFormationStackSetExecutionRole
+      CallAs: SELF
+      Capabilities:
+        - CAPABILITY_IAM
+        - CAPABILITY_AUTO_EXPAND
+        - CAPABILITY_NAMED_IAM
+      Description: Multi-Region Aurora Deployment
+      OperationPreferences:
+        FailureToleranceCount: 0
+        MaxConcurrentCount: 2
+        RegionConcurrencyType: PARALLEL
+      Parameters:
+        - ParameterKey: SecondaryClusterIdentifier
+          ParameterValue: !Ref SecondaryClusterIdentifier
+        - ParameterKey: SecondaryInstanceIdentifier
+          ParameterValue: !Ref SecondaryInstanceIdentifier
+        - ParameterKey: SecondaryInstanceClass
+          ParameterValue: !GetAtt GatherInfo.WriterInstanceClass
+        - ParameterKey: Engine
+          ParameterValue: !GetAtt GatherInfo.Engine
+        - ParameterKey: EngineVersion
+          ParameterValue: !GetAtt GatherInfo.EngineVersion
+        - ParameterKey: GlobalDatabaseIdentifier
+          ParameterValue: !Ref GlobalDatabaseIdentifier
+        - ParameterKey: PrimaryRegionName
+          ParameterValue: !Ref AWS::Region
+        - ParameterKey: SecondaryDBSubnetID
+          ParameterValue: !Ref SecondaryDBSubnetID
+        - ParameterKey: SecondarySecurityGroupID
+          ParameterValue: !Ref SecondarySecurityGroupID
+        - ParameterKey: SecondaryEncryptionKeyARN
+          ParameterValue: !GetAtt GatherInfo.SecondaryEncryptionKeyARN
+        - ParameterKey: SecondaryClusterParameterGroup
+          ParameterValue: !Ref SecondaryClusterParameterGroup
+        - ParameterKey: SecondaryDBParameterGroup
+          ParameterValue: !Ref SecondaryDBParameterGroup
+        - ParameterKey: WriterServerlessV2
+          ParameterValue: !GetAtt GatherInfo.WriterServerlessV2
+        - ParameterKey: MinCapacity
+          ParameterValue: !GetAtt GatherInfo.MinCapacity
+        - ParameterKey: MaxCapacity
+          ParameterValue: !GetAtt GatherInfo.MaxCapacity
+        - ParameterKey: HeadlessCluster
+          ParameterValue: !Ref HeadlessCluster
+          
+      PermissionModel: SELF_MANAGED
+      StackInstancesGroup:
+        - DeploymentTargets:
+            Accounts:
+              - !Ref 'AWS::AccountId'
+          Regions:
+            - !Ref 'SecondaryRegionName'
+      StackSetName: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - AGDSecondaryRegionCluster
+      TemplateBody: |
+
+        Parameters:
+          SecondaryClusterIdentifier:
+            Description: Secondary Cluster identifier
+            Type: String
+          SecondaryInstanceIdentifier:
+            Description: Secondary Cluster instance identifier
+            Type: String
+          SecondaryInstanceClass:
+            Description : Secondary Cluster Instance classification
+            Type: String
+          Engine:
+            Description: Engine Type
+            Type: String
+          EngineVersion:
+            Description: Engine Version
+            Type: String
+          GlobalDatabaseIdentifier:
+            Description: Global database identifier
+            Type: String
+          PrimaryRegionName:
+            Description: Primary Region Name
+            Type: String
+          SecondaryDBSubnetID:
+            Description: SecondaryDBSubnetID
+            Type: String
+          SecondarySecurityGroupID:
+            Description: SecondarySecurityGroupID
+            Type: String
+          SecondaryEncryptionKeyARN:
+            Description: SecondaryEncryptionKeyARN
+            Type: String
+          SecondaryClusterParameterGroup:
+            Description: SecondaryClusterParameterGroup
+            Type: String
+          SecondaryDBParameterGroup:
+            Description: SecondaryDBParameterGroup
+            Type: String
+          WriterServerlessV2:
+            Description: WriterServerlessV2
+            Type: String
+          MaxCapacity:
+            Description: MaxCapacity
+            Type: Number
+          MinCapacity:
+            Description: MinCapacity
+            Type: Number
+          HeadlessCluster:
+            Description: To create headless cluster in the Secondary region
+            Type: String
+
+        Conditions:
+          SecondaryClusterParameterExists: !Not [ !Equals [ !Ref SecondaryClusterParameterGroup, "default" ] ]
+          SecondaryDBParameterExists: !Not [ !Equals [!Ref SecondaryDBParameterGroup, "default"]]
+          WriterIsServerlessV2: !Equals [ !Ref WriterServerlessV2, "YES"]
+          NoHeadlessCluster: !Equals [ !Ref HeadlessCluster, "No" ]
+
+        Resources:
+
+          SecondaryRegionClusterInstance:
+            Type: AWS::RDS::DBCluster
+            Properties:
+              DBClusterIdentifier: !Ref SecondaryClusterIdentifier
+              GlobalClusterIdentifier: !Ref GlobalDatabaseIdentifier
+              SourceRegion: !Ref PrimaryRegionName
+              Engine: !Ref Engine
+              DBSubnetGroupName: !Ref SecondaryDBSubnetID
+              VpcSecurityGroupIds: 
+                - !Ref SecondarySecurityGroupID
+              StorageEncrypted: true
+              KmsKeyId: !Ref SecondaryEncryptionKeyARN
+              DBClusterParameterGroupName: !If [ SecondaryClusterParameterExists, !Ref SecondaryClusterParameterGroup, !Ref AWS::NoValue ]
+              DBInstanceParameterGroupName: !If [ SecondaryDBParameterExists, !Ref SecondaryDBParameterGroup, !Ref AWS::NoValue ]
+              EngineVersion: !Ref EngineVersion
+              ServerlessV2ScalingConfiguration: 
+                MinCapacity: !If [ WriterIsServerlessV2, !Ref MinCapacity, !Ref AWS::NoValue ]
+                MaxCapacity: !If [ WriterIsServerlessV2, !Ref MaxCapacity, !Ref AWS::NoValue ]
+
+          SecondaryRegionReaderInstance:
+            Type: AWS::RDS::DBInstance
+            DependsOn: SecondaryRegionClusterInstance
+            Condition: NoHeadlessCluster
+            Properties:
+              DBInstanceClass: !Ref SecondaryInstanceClass
+              DBInstanceIdentifier: !Ref SecondaryInstanceIdentifier
+              DBClusterIdentifier: !Ref SecondaryClusterIdentifier
+              Engine: !Ref Engine
+
+  AGDCommonStack:
+    Type: AWS::CloudFormation::StackSet
+    DependsOn: 
+      - GatherInfo
+      - AGDSecondaryRegionCluster
+    Properties:
+      AdministrationRoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSCloudFormationStackSetAdministrationRole"
+      ExecutionRoleName: AWSCloudFormationStackSetExecutionRole
+      CallAs: SELF
+      Capabilities:
+        - CAPABILITY_IAM
+        - CAPABILITY_AUTO_EXPAND
+        - CAPABILITY_NAMED_IAM
+      Description: Multi-Region Aurora Deployment
+      OperationPreferences:
+        FailureToleranceCount: 0
+        MaxConcurrentCount: 2
+        RegionConcurrencyType: PARALLEL
+      Parameters:
+        - ParameterKey: PrimaryClusterIdentifier
+          ParameterValue: !Ref PrimaryClusterIdentifier
+        - ParameterKey: SecondaryClusterIdentifier
+          ParameterValue: !Ref SecondaryClusterIdentifier
+        - ParameterKey: NotificationEmailAddress
+          ParameterValue: !Ref NotificationEmailAddress
+        - ParameterKey: PrimaryRegionName
+          ParameterValue: !Ref AWS::Region
+        - ParameterKey: SecondaryRegionName
+          ParameterValue: !Ref SecondaryRegionName
+        - ParameterKey: GlobalDatabaseIdentifier
+          ParameterValue: !Ref GlobalDatabaseIdentifier
+        - ParameterKey: DashboardNamePrefix
+          ParameterValue: !Ref DashboardNamePrefix
+          
+      PermissionModel: SELF_MANAGED
+      StackInstancesGroup:
+        - DeploymentTargets:
+            Accounts:
+              - !Ref 'AWS::AccountId'
+          Regions:
+            - !Ref 'SecondaryRegionName'
+            - !Ref AWS::Region
+      StackSetName: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - AGDCommonStack
+      TemplateBody: |
+
+        Conditions:
+          IsPrimaryRegion: !Equals [ !Ref PrimaryRegionName, !Ref AWS::Region ]
+
+        Parameters:
+          PrimaryClusterIdentifier:
+            Description: Primary Cluster Identifier
+            Type: String
+          SecondaryClusterIdentifier:
+            Description: Secondary Cluster identifier
+            Type: String
+          NotificationEmailAddress: 
+            Description: Notification Email address
+            Type: String
+          PrimaryRegionName: 
+            Description: PrimaryRegionName
+            Type: String
+          SecondaryRegionName: 
+            Description: SecondaryRegionName
+            Type: String
+          GlobalDatabaseIdentifier: 
+            Description: GlobalDatabaseIdentifier
+            Type: String 
+          DashboardNamePrefix:
+            Description: DashboardNamePrefix
+            Type: String
+
+        Resources:
+
+          AGDReplicationLagAlarm:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+                ActionsEnabled: true
+                OKActions: []
+                AlarmActions:
+                    - !Ref AGDSNSTopic
+                InsufficientDataActions: []
+                MetricName: AuroraGlobalDBReplicationLag
+                Namespace: AWS/RDS
+                Statistic: Average
+                Dimensions:
+                    - Name: DBClusterIdentifier
+                      Value: !If [IsPrimaryRegion, !Ref PrimaryClusterIdentifier, !Ref SecondaryClusterIdentifier]
+                Period: 300
+                EvaluationPeriods: 1
+                DatapointsToAlarm: 1
+                Threshold: 600000
+                ComparisonOperator: GreaterThanThreshold
+                TreatMissingData: missing
+
+          AGDSNSTopic: 
+            Type: AWS::SNS::Topic
+            Properties: 
+              Subscription: 
+                - Endpoint: !Ref NotificationEmailAddress
+                  Protocol: "email"
+
+          AGDSNSTopicPolicy:
+            Type: AWS::SNS::TopicPolicy
+            Properties: 
+              PolicyDocument:
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: 
+                       - events.amazonaws.com
+                       - cloudwatch.amazonaws.com
+                    Action: sns:Publish
+                    Resource: !Ref AGDSNSTopic
+              Topics: 
+                - !Ref AGDSNSTopic      
+
+          AGDCloudwatchDashboard:
+            Type: AWS::CloudWatch::Dashboard
+            Properties:
+              DashboardBody: '{ "widgets": [] }'
+              DashboardName: !Join [ "_" , [ !Ref DashboardNamePrefix, !If [IsPrimaryRegion, !Ref PrimaryRegionName, !Ref SecondaryRegionName] ] ]
+
+          GatherInfo:
+            Type: Custom::GatherInfo
+            DependsOn:
+              - AGDCloudwatchDashboard
+            Properties:
+              ServiceToken: !GetAtt 'GatherInfoLambda.Arn'
+              PrimaryClusterIdentifier: !Ref PrimaryClusterIdentifier
+              AGDCloudwatchDashboard: !Ref AGDCloudwatchDashboard
+              PrimaryClusterIdentifier: !Ref PrimaryClusterIdentifier
+              SecondaryClusterIdentifier: !Ref SecondaryClusterIdentifier
+              PrimaryRegionName: !Ref PrimaryRegionName
+              SecondaryRegionName: !Ref SecondaryRegionName
+              GlobalDatabaseIdentifier: !Ref GlobalDatabaseIdentifier
+              CurrentRegion: !Ref AWS::Region
+              CustomDashboardARN: !GetAtt GDBFailoverLambda.Arn
+
+          GatherInfoRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+              Path: /
+              Policies:
+                - PolicyName: lambda-createkeypair1
+                  PolicyDocument:
+                    Version: '2012-10-17'
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - rds:*
+                          - cloudwatch:*
+                        Resource:
+                          - '*'
+
+          GatherInfoLambda:
+            Type: AWS::Lambda::Function
+            Properties:
+              Description: Gathers all the information regarding the current Aurora cluster
+              Handler: index.lambda_handler
+              Runtime: python3.9
+              Role: !GetAtt 'GatherInfoRole.Arn'
+              Timeout: 300
+              Code:
+                ZipFile: |
+                      import json
+                      import boto3
+                      import sys
+                      import os
+                      import urllib.request
+                      import cfnresponse
+                      import traceback
+                      from botocore.exceptions import ClientError
+
+                      def cloudwatch_dashboard(AGDCloudwatchDashboard,PrimaryClusterIdentifier,GlobalDatabaseIdentifier,PrimaryRegionName,SecondaryRegionName,CustomDashboardARN):
+            
+                        cloudwatch_template_body = """
+                        {"widgets":[{"height":6,"width":24,"y":29,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","ConnectionAttempts","DBClusterIdentifier","CLUSTER_NAME"],[".","RowLockTime",".","."],[".","DMLLatency",".","."],[".","InsertLatency",".","."],[".","Deadlocks",".","."]],"region":"PRIMARY_REGION","view":"timeSeries","stacked":true,"period":60,"stat":"Average","title":"Database Workload Metrics"}},{"height":6,"width":24,"y":35,"x":0,"type":"metric","properties":{"region":"PRIMARY_REGION","view":"timeSeries","stacked":true,"metrics":[["AWS/RDS","DMLThroughput","DBClusterIdentifier","CLUSTER_NAME"],[".","DeleteThroughput",".","."],[".","InsertThroughput",".","."],[".","UpdateThroughput",".","."],[".","SelectThroughput",".","."],[".","CommitThroughput",".","."]],"title":"Database Throughput Metrics","period":300}},{"height":5,"width":6,"y":8,"x":5,"type":"metric","properties":{"sparkline":true,"view":"singleValue","metrics":[["AWS/RDS","AuroraGlobalDBProgressLag","DBClusterIdentifier","CLUSTER_NAME"]],"region":"PRIMARY_REGION","period":300,"title":"Global Database Progress Lag"}},{"height":5,"width":7,"y":8,"x":11,"type":"metric","properties":{"metrics":[["AWS/RDS","AuroraGlobalDBRPOLag","DBClusterIdentifier","CLUSTER_NAME"]],"sparkline":true,"view":"singleValue","region":"PRIMARY_REGION","period":60,"stat":"Average","title":"Global Database RPO Lag"}},{"height":5,"width":5,"y":8,"x":0,"type":"metric","properties":{"sparkline":true,"view":"singleValue","metrics":[["AWS/RDS","AuroraGlobalDBReplicationLag","DBClusterIdentifier","CLUSTER_NAME"]],"region":"PRIMARY_REGION","period":300,"title":"Global Database Replication Lag"}},{"height":5,"width":6,"y":8,"x":18,"type":"metric","properties":{"metrics":[["AWS/RDS","AuroraGlobalDBDataTransferBytes","DBClusterIdentifier","CLUSTER_NAME"]],"sparkline":true,"view":"singleValue","region":"PRIMARY_REGION","period":60,"stat":"Average","title":"Global Database Data Transfer Bytes"}},{"height":6,"width":24,"y":2,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","AuroraGlobalDBReplicationLag","DBClusterIdentifier","CLUSTER_NAME"],["...",{"stat":"Maximum"}]],"view":"timeSeries","stacked":false,"region":"PRIMARY_REGION","stat":"Average","period":60,"title":"Global Database Replication Lag - Average vs Maximum"}},{"height":4,"width":12,"y":13,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average CPU Utilization","period":60,"view":"timeSeries","stacked":true}},{"height":4,"width":12,"y":13,"x":12,"type":"metric","properties":{"metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","CLUSTER_NAME"]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Database Connections","period":300,"view":"timeSeries","stacked":false,"stat":"Average"}},{"height":4,"width":12,"y":17,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","FreeStorageSpace","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Available Storage Space","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":12,"y":17,"x":12,"type":"metric","properties":{"metrics":[["AWS/RDS","FreeableMemory","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Available Memeory","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":21,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","ReadLatency","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Read Latency","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":21,"x":8,"type":"metric","properties":{"metrics":[["AWS/RDS","ReadThroughput","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average","yAxis":"right"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Read Throughput","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":21,"x":16,"type":"metric","properties":{"metrics":[["AWS/RDS","ReadIOPS","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average","yAxis":"right"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Read IOPS","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":25,"x":0,"type":"metric","properties":{"metrics":[["AWS/RDS","WriteLatency","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Write Latency","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":25,"x":8,"type":"metric","properties":{"metrics":[["AWS/RDS","WriteThroughput","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average","yAxis":"right"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Write Throughput","period":300,"view":"timeSeries","stacked":false}},{"height":4,"width":8,"y":25,"x":16,"type":"metric","properties":{"metrics":[["AWS/RDS","WriteIOPS","DBClusterIdentifier","CLUSTER_NAME",{"stat":"Average","yAxis":"right"}]],"legend":{"position":"right"},"region":"PRIMARY_REGION","title":"Average Write IOPS","period":300,"view":"timeSeries","stacked":false}},{"type":"custom","x":0,"y":0,"width":24,"height":2,"properties":{"endpoint":"LAMBDA_ARN","updateOn":{"refresh":true,"resize":true,"timeRange":true},"params":{"globalDBIdentifier":"GLOBAL_DB_NAME","region":"PRIMARY_REGION","SOURCE":"cloudwatch"},"title":""}}]}
+                        """
+
+                        client = boto3.client('cloudwatch')
+                        DashboardBody =  cloudwatch_template_body.replace("CLUSTER_NAME",PrimaryClusterIdentifier).replace("PRIMARY_REGION",PrimaryRegionName).replace("GLOBAL_DB_NAME",GlobalDatabaseIdentifier).replace("LAMBDA_ARN",CustomDashboardARN)
+                        response = client.put_dashboard(DashboardName=AGDCloudwatchDashboard, DashboardBody = DashboardBody)
+                        return None
+
+                      
+                      def lambda_handler(event, context):
+                          status = cfnresponse.SUCCESS
+                          data = {}
+                          key_name = "GatherInfo"
+                          if event['RequestType'] != "Create":
+                            data = {"Success": "Skiping the exeuction for non-create events"}
+                            cfnresponse.send(event, context, status, data, key_name, noEcho=True)
+                            return
+                            
+                          PrimaryClusterIdentifier = event['ResourceProperties']['PrimaryClusterIdentifier']
+                          GlobalDatabaseIdentifier = event['ResourceProperties']['GlobalDatabaseIdentifier']
+                          SecondaryClusterIdentifier = event['ResourceProperties']['SecondaryClusterIdentifier']
+                          PrimaryRegionName = event['ResourceProperties']['PrimaryRegionName']
+                          SecondaryRegionName = event['ResourceProperties']['SecondaryRegionName']
+                          CurrentRegion = event['ResourceProperties']['CurrentRegion']
+                          AGDCloudwatchDashboard = event['ResourceProperties']['AGDCloudwatchDashboard']
+                          CustomDashboardARN = event['ResourceProperties']['CustomDashboardARN']
+                          
+                          print ("My event {}".format(event))
+                          print("Aurora cluster name {}".format(PrimaryClusterIdentifier))
+                          key_name = PrimaryClusterIdentifier
+
+                          try:
+                            if PrimaryRegionName == CurrentRegion:
+                              data['PrimaryCloudwatchBody'] = cloudwatch_dashboard(AGDCloudwatchDashboard, PrimaryClusterIdentifier,GlobalDatabaseIdentifier,PrimaryRegionName,SecondaryRegionName,CustomDashboardARN)
+                            else:
+                              data['SecondaryCloudwatchBody'] = cloudwatch_dashboard(AGDCloudwatchDashboard, SecondaryClusterIdentifier,GlobalDatabaseIdentifier,SecondaryRegionName,PrimaryRegionName,CustomDashboardARN)
+                          except:
+                            traceback.print_exc()
+                            status = cfnresponse.FAILED
+                          cfnresponse.send(event, context, status, data, key_name, noEcho=True)
+
+          
+          GDBFailoverLambdaRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+              Path: /
+              Policies:
+                - PolicyName: lambda-createkeypair1
+                  PolicyDocument:
+                    Version: '2012-10-17'
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - cloudwatch:*
+                          - rds:*
+                        Resource:
+                          - '*'
+
+          # Lambda function to handle both planned and unplanned failovers.
+          GDBFailoverLambda:
+            Type: AWS::Lambda::Function
+            DependsOn: GDBFailoverLambdaRole
+            Properties:
+              Description: Lambda function framework to take any action for the global database manual planned or unplanned failover.
+              Handler: index.lambda_handler
+              Role: !GetAtt GDBFailoverLambdaRole.Arn
+              Runtime: python3.8
+              Timeout: 600
+              Code:
+                ZipFile: |
+                  import json
+                  import string
+                  import boto3
+                  from boto3.dynamodb.types import TypeSerializer,TypeDeserializer
+
+                  def populate_dashboard(event):
+                          
+                    html_template = """<html>
+                          <body> 
+                          <br> 
+                          <h1 style="color:COLOR; text-align:center">STATUS</h1> 
+                          <br>
+                          </html>"""
+                          
+                    globalDBIdentifier = event.get("globalDBIdentifier",None)
+                    region  = event.get("region", None)
+                          
+                    if globalDBIdentifier is  None or region is  None:
+                      return html_template.replace("STATUS","Unable to determine the status").replace("COLOR","red")
+
+                    try:
+                      client = boto3.client("rds",region_name = region)
+                      response = client.describe_global_clusters( GlobalClusterIdentifier=globalDBIdentifier)
+                      for members in response['GlobalClusters'][0]['GlobalClusterMembers']:
+                        if members['DBClusterArn'].split(":")[3] == region:
+                          if members['IsWriter'] :
+                            return html_template.replace("STATUS","Primary Cluster").replace("COLOR","green")
+                          else:
+                            return html_template.replace("STATUS","Secondary Cluster").replace("COLOR","green")
+                    except:
+                      return html_template.replace("STATUS","Failed to get current status").replace("COLOR","red")
+                                                    
+
+                  def lambda_handler(event, context):
+
+                      if 'SOURCE' in event:
+                        return populate_dashboard(event)
+
+                      # dump the received event in json format
+                      mymsg=json.dumps(event)
+                      # Parse the json event to gather Event ID, cluster ARN, region for the cluster, and the clustername
+                      # mymsg = event['detail']['Message']
+                      eventid= event['detail']['EventID']
+                      resourcename = event['resources'][0]
+                      resourcename = resourcename.split(':')
+                      regioname = resourcename[3]
+                      cluster_name = resourcename[6]
+                      # Only process event if the the global database failover completed
+                      if eventid == "RDS-EVENT-0185" or eventid == "RDS-EVENT-0228":
+                          print("Message: ",mymsg)
+                          print("Event Id: : ", eventid)
+                          print("Region: ",regioname)
+                          print("Cluster name: ",cluster_name)
+                          if eventid == "RDS-EVENT-0185" :
+                              print("Planned failover event observed. Use the following block for any action to be taken")
+                              print("--- Section for Manual Planned failover--------")
+                          else: 
+                              print("Unplanned failover event observed. Please use the following block for any action to be taken")
+                              print("--- Section for Unplanned failover--------")
+                          return { 'statusCode': 200, 'body': json.dumps('event processed')}
+                      else:
+                          return {'statusCode': 100,'body': json.dumps('event discarded!')}
+
+          #Create the eventbridge rule. This rule triggers when a global database completes failover. Created if either "all" or "planned" features support is needed.
+          GDBFailoverEBRule:
+            Type: AWS::Events::Rule
+            Properties: 
+              Description: Event Bridge rule to track Aurora Global Database failover in this region
+              EventPattern:
+                source: 
+                  - "aws.rds"
+                detail-type: 
+                  - "RDS DB Cluster Event"
+                detail: 
+                  EventCategories: 
+                    - "global-failover"
+                    - "configuration change"
+                  EventID:
+                    - "RDS-EVENT-0185"
+                    - "RDS-EVENT-0228"
+              Targets: 
+              # Calling above lambda function and SNS topic as a target
+                - Arn: !GetAtt GDBFailoverLambda.Arn
+                  Id: "AGDLambdaTarget"
+                - Arn: !Ref AGDSNSTopic
+                  Id: "AGDEmailTarget"
+
+          #Add the lambda permission so it can be invoked by the rule
+          GDBFailoverEBRulePermission:
+            Type: AWS::Lambda::Permission
+            DependsOn: GDBFailoverEBRule
+            Properties: 
+              Action: lambda:InvokeFunction
+              FunctionName: !GetAtt GDBFailoverLambda.Arn
+              Principal: events.amazonaws.com
+              SourceArn: !GetAtt GDBFailoverEBRule.Arn
+

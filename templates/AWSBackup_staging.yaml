@@ -1,0 +1,384 @@
+# *
+# * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# * SPDX-License-Identifier: MIT-0
+# *
+# * Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# * software and associated documentation files (the "Software"), to deal in the Software
+# * without restriction, including without limitation the rights to use, copy, modify,
+# * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# * permit persons to whom the Software is furnished to do so.
+# *
+# * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# *
+AWSTemplateFormatVersion: 2010-09-09
+Description: Automating cross-account backup of Amazon Aurora and Amazon RDS databases with AWS Backup - Account B, Region A
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "AWS Backup Configuration"
+        Parameters:
+          - pBackupVaultName
+          - pAWSOrganizationID
+          - pSourceBackupAccountID
+          - pDestinationAWSRegion
+   
+    ParameterLabels:
+      pBackupVaultName:
+        default: AWS Backup Vault Name
+      pAWSOrganizationID:
+        default: AWS Organization ID
+      pSourceBackupAccountID:
+        default: AWS Source Account ID
+      pDestinationAWSRegion:
+        default: AWS Backup Destination Region
+
+Parameters:
+  pBackupVaultName:
+    Type: String
+    Description: The name of a logical container where backups are stored. Backup vaults are identified by names that are unique to the account used to create them and the AWS Region where they are created.
+  pAWSOrganizationID:
+    Type: String
+    Description: AWS Organizations ID
+  pSourceBackupAccountID:
+    Type: String
+    Description: AWS Account ID
+  pDestinationAWSRegion:
+    Type: String
+    Description: AWS Region for cross-region backups. Do not select the same region where this CloudFormation stack is being created.
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+      - us-west-1
+      - us-west-2
+      - ap-south-1
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-northeast-3
+      - ap-southeast-1
+      - ap-southeast-2
+      - ca-central-1
+      - eu-central-1
+      - eu-west-1
+      - eu-west-2
+      - eu-west-3
+      - eu-north-1
+      - sa-east-1
+
+Resources:
+# IAM Role for AWS Backup
+  rAWSBackupIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows AWS Backup to call AWS services on your behalf
+      AssumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "backup.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+
+  rIAMPolicyRDSServiceLinkedRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: service-role-rds
+      Roles:
+        - !Ref rAWSBackupIAMRole
+      PolicyDocument: !Sub |
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Action": "iam:CreateServiceLinkedRole",
+                      "Resource": "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS"
+                  }
+              ]
+          }
+# AWS KMS Key and AWS Backup Vault
+# Note: Second policy statement is not supported through the web console, only through CloudFormation or API call.
+  rKMSCMK:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      Description: KMS key for AWS Backup Vault
+      KeyPolicy: !Sub |
+          {
+              "Version": "2012-10-17",
+              "Id": "backup-vault-policy-${pBackupVaultName}",
+              "Statement": [
+                  {
+                      "Sid": "Enable IAM User Permissions for root",
+                      "Effect": "Allow",
+                      "Principal": {
+                          "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                      },
+                      "Action": "kms:*",
+                      "Resource": "*"
+                  },
+                  {
+                      "Sid": "Allow access from AWS Organizations accounts to copy backups",
+                      "Effect": "Allow",
+                      "Principal": {
+                          "AWS": "*"
+                      },
+                      "Action": [
+                          "kms:CreateGrant",
+                          "kms:Decrypt",
+                          "kms:GenerateDataKey*",
+                          "kms:DescribeKey"
+                      ],
+                      "Resource": "*",
+                      "Condition": {
+                          "StringEquals": {
+                              "aws:PrincipalOrgID": "${pAWSOrganizationID}"
+                          }
+                      }
+                  },
+                  {
+                      "Sid": "Allow access from AWS source accounts to copy backups",
+                      "Effect": "Allow",
+                      "Principal": {
+                          "AWS": "*"
+                      },
+                      "Action": [
+                          "kms:CreateGrant",
+                          "kms:Decrypt",
+                          "kms:GenerateDataKey*",
+                          "kms:DescribeKey"
+                      ],
+                      "Resource": "*",
+                      "Condition": {
+                          "StringEquals": {
+                              "aws:PrincipalAccount": "${pSourceBackupAccountID}"
+                          }
+                      }
+                  }
+              ]
+          }     
+
+  rKMSCMKAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/cmk-${pBackupVaultName}"
+      TargetKeyId: !Ref rKMSCMK
+
+  rBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      AccessPolicy: !Sub |
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Sid": "Enable backup vault access for cross account",
+                      "Effect": "Allow",
+                      "Principal": "*",
+                      "Action": "backup:CopyIntoBackupVault",
+                      "Resource": "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:${pBackupVaultName}",
+                      "Condition": {
+                          "StringEquals": {
+                              "aws:PrincipalOrgID": "${pAWSOrganizationID}"
+                          }
+                      }
+                  },
+                  {
+                      "Sid": "Enable backup vault access",
+                      "Effect": "Allow",
+                      "Principal": "*",
+                      "Action": "backup:CopyIntoBackupVault",
+                      "Resource": "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:${pBackupVaultName}",
+                      "Condition": {
+                          "StringEquals": {
+                              "aws:PrincipalAccount": "${pSourceBackupAccountID}"
+                          }
+                      }
+                  }
+              ]
+          }
+      BackupVaultName: !Ref pBackupVaultName
+      EncryptionKeyArn: !GetAtt rKMSCMK.Arn
+# EventBridge and Lambda Rule for Cross-Region Backup Copies
+  rLambdaIAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: Cloudwatch-Backup-Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - backup:StartCopyJob
+                  - backup:DescribeRecoveryPoint
+                Resource:
+                  - arn:aws:backup:*:*:*
+                  - arn:aws:rds:*:*:*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - arn:aws:logs:*:*:*
+        - PolicyName: LambdaPolicy-AssumeRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt rAWSBackupIAMRole.Arn
+      Description: "Allows Lambda functions to call AWS services on your behalf"
+
+  rLambdaFunction:
+    Type: AWS::Lambda::Function
+    # checkov:skip=CKV_AWS_117: AWS Backup service lambda function
+    # checkov:skip=CKV_AWS_116: AWS Backup service lambda function. No Dead Letter Queue required
+    # checkov:skip=CKV_AWS_173: NO environmental variables configured for this function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "AWS Backup service lambda function"
+    Properties:
+      Description: Lambda Function that triggers an AWS Backup Vault Copy in a different region
+      Environment: 
+        Variables: 
+          role_name: !GetAtt rAWSBackupIAMRole.Arn
+          destination_region: !Ref pDestinationAWSRegion
+      FunctionName: "AWSBackup-RDS-Aurora-Cross-Region-Backup-Copy"
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          import json, boto3, os, logging, time, sys
+
+          def lambda_handler(event, context):
+              # Logging configuration
+              logger = logging.getLogger()
+              logger.setLevel(logging.INFO)
+              logging.getLogger("boto3").setLevel(logging.WARNING)
+              logging.getLogger("botocore").setLevel(logging.WARNING)
+              logger.debug('Incoming Event') 
+              logger.debug(event)
+
+              # Function variables
+              backup_vault_name = event['detail']['destinationBackupVaultArn'].split(':')[6]
+              source_region = event['detail']['destinationBackupVaultArn'].split(':')[3]
+              lifecycle_value = 'CalculatedLifecycle'
+              logger.info('Backup source account: ' + event['account'])
+              logger.info('Recovery Point ARN to be copied: ' + event['detail']['destinationRecoveryPointArn'])
+
+              # Environment variables
+              destination_region = os.environ.get('destination_region')
+              logger.info('Sending backup to the following AWS Region: ' + destination_region)
+              role_name = os.environ.get('role_name')
+              
+              # Boto3 client
+              backup_connection = boto3.client('backup')
+              
+              # Boto3 call to retrieve recovery point retention/lifecycle value
+              recovery_point = backup_connection.describe_recovery_point(
+                  BackupVaultName = backup_vault_name,
+                  RecoveryPointArn = event['detail']['destinationRecoveryPointArn']
+                  )
+              logger.debug('Recovery Point Information')    
+              logger.debug(recovery_point)
+
+              # If value is found, it will be passed to the start copy job boto3 call
+              try:
+                  if lifecycle_value in recovery_point:
+                      response = backup_connection.start_copy_job(
+                          RecoveryPointArn = event['detail']['destinationRecoveryPointArn'],
+                          SourceBackupVaultName = backup_vault_name,
+                          DestinationBackupVaultArn = event['detail']['destinationBackupVaultArn'].replace(source_region,destination_region),
+                          IamRoleArn = role_name,
+                          Lifecycle={
+                          'DeleteAfterDays': int(recovery_point['Lifecycle']['DeleteAfterDays'])
+                          }        
+                      )        
+              
+                  # Else, value has not been defined and will not be defined in start copy job boto3 call
+                  else:
+                      response = backup_connection.start_copy_job(
+                          RecoveryPointArn = event['detail']['destinationRecoveryPointArn'],
+                          SourceBackupVaultName = backup_vault_name,
+                          DestinationBackupVaultArn = event['detail']['destinationBackupVaultArn'].replace(source_region,destination_region),
+                          IamRoleArn = role_name
+                      )
+              except Exception as e:
+                  logger.error(str(e))
+                  
+              logger.info('AWS Backup Copy Job ID: ' + response['CopyJobId'])    
+              return json.dumps(response, default=str)
+      MemorySize: 128
+      Role: !GetAtt rLambdaIAMRole.Arn
+      ReservedConcurrentExecutions: 5
+      Runtime: python3.8
+      Timeout: 3
+      TracingConfig: 
+        Mode: "PassThrough"
+
+  rLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt rLambdaFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt rEventsRule.Arn
+
+  rEventsEventBusPolicy:
+    Type: "AWS::Events::EventBusPolicy"
+    Properties:
+      StatementId: "AWSBackupCopyCompleteEvent"
+      Action: "events:PutEvents"
+      Principal: "*"
+
+  rEventsRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "AWSBackupCopyCompleteRule"
+      Description: "EventBridge Rule for CopyCompleteJob event to trigger cross-region backup copy for RDS/Aurora resources"
+      EventPattern: !Sub |
+          {
+            "source": ["aws.backup"],
+            "account": [{
+              "anything-but": "${AWS::AccountId}"
+            }],
+            "detail-type": ["Copy Job State Change"],
+            "detail": {
+              "state": ["COMPLETED"],
+              "resourceType": ["RDS", "Aurora"]
+            }
+          }
+      State: "ENABLED"
+      Targets: 
+      - 
+        Arn: !GetAtt rLambdaFunction.Arn
+        Id: "TargetFunctionV1"
+      EventBusName: "default"
