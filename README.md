@@ -12,7 +12,7 @@ This solution is built with two primary components:
 
 For more information refer to the implementation gudie. 
 
-### Template option 1: Amazon Aurora Global Databases
+### Solution 1: Amazon Aurora Global Databases
 
 The solution’s disaster recovery option with Amazon Aurora Global Database provides the following components and workflows, which are shown as numbered steps in the following diagram.
 
@@ -29,7 +29,7 @@ The solution’s disaster recovery option with Amazon Aurora Global Database pro
 
 
 
-### Template option 2: AWS Backup
+### Solution 2: AWS Backup
 
 The solution’s disaster recovery option with AWS Backup provides the following components and workflows, which are shown as numbered steps in the following diagram.
 
