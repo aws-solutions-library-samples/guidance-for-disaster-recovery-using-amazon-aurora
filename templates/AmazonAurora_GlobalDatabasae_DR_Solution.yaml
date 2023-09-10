@@ -139,8 +139,6 @@ Resources:
     
   GatherInfoLambda:
     Type: AWS::Lambda::Function
-    # checkov:skip=CKV_AWS_117:Custom resource deployed in default VPC
-    # checkov:skip=CKV_AWS_116:Custom resource. No Dead Letter Queue required
     Metadata:
         cfn_nag:
           rules_to_suppress:

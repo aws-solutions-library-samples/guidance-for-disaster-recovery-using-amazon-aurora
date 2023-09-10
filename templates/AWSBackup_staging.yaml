@@ -258,9 +258,6 @@ Resources:
 
   rLambdaFunction:
     Type: AWS::Lambda::Function
-    # checkov:skip=CKV_AWS_117: AWS Backup service lambda function
-    # checkov:skip=CKV_AWS_116: AWS Backup service lambda function. No Dead Letter Queue required
-    # checkov:skip=CKV_AWS_173: NO environmental variables configured for this function
     Metadata:
       cfn_nag:
         rules_to_suppress:
