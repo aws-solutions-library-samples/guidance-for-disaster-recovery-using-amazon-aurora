@@ -133,14 +133,14 @@ Here the list of sample parameters along with the description
 
 Once the CloudFormation stack is deployed successfully, it would have provisioned the following resources
 
-* If the Primary Region cluster is not configured for Multi-AZ option, it will be enabled as part of the CloudFormation stack deployment. It will create an Aurora reader instance in different AZ that of writer instance with the same configuration as writer in terms of instance type and parameter group.
-* Creates Global database with the name provided during the stack deployment
-* Adds secondary region to the global database 
-* Adds a reader instance in the secondary region based on the configuration information provided during the stack deployment
-* CloudWatch dashboards with the predefined monitoring metrics
-* CloudWatch alarm for Aurora Global database replication lag.
-* Lambda functions to handle Global Database planned switchover/unplanned outage. 
-* Amazon SNS notifications to alert for CloudWatch Alarm and Global database failover
+* If the Amazon Aurora Cluster in the primary region is not already configured for Multi-AZ, this capability will be enabled as part of the CloudFormation stack deployment. This will create an Aurora reader instance in a different availability zone (AZ) from the writer instance, matching the writer configuration in terms of instance type and parameter group.
+* Creates a Global database with the name provided during the stack deployment.
+* Adds secondary region to the global database.
+* Adds a reader instance in the secondary region based on the configuration information provided during the stack deployment.
+* Creates CloudWatch dashboard with the predefined monitoring metrics.
+* Configures CloudWatch alarm for Aurora Global database replication lag.
+* Provides Lambda functions to handle Global Database planned switchovers or unplanned outages.
+* Configures Amazon SNS notification to alert for CloudWatch Alarm and Global database planned switchovers/unplanned outage.
 
 
 #### 4. Monitor and test failover 
@@ -250,7 +250,7 @@ You can use the sample script to plug in the values for your AWS resources and k
 6. Once the backups are created and visible in the AWS Backup console of the target account under the `btest` backup vault, you can restore a new Aurora cluster using the backups in the central backup account. For detailed steps refer to [Restoring an Amazon Aurora cluster](https://docs.aws.amazon.com/aws-backup/latest/devguide/restoring-aur.html). Refer to the implementation guide for more details on this step. 
 
 
-### Uninstall the deployment for Amazon Aurora Global Database
+### Soluiton 1: Uninstall the deployment for Amazon Aurora Global Database
 
 To uninstall this solution, you must delete the AWS CloudFormation stack and any other stacks that were created as a result of the Aurora DR Solution. Because some AWS CloudFormation stacks use IAM roles created by previous stacks, you must delete AWS CloudFormation stacks in the reverse order they were created (delete the most recent stack first, wait for the stack deletion to be completed, and then delete the next stack). 
 
@@ -273,7 +273,7 @@ $ aws cloudformation delete-stack --stack-name <installation-stack-name>
 
 Deleting the CloudFormation stack, deletes all the resources provisioned as part of the deployment. It is recommended that you use tags to ensure that all resources associated with Amazon Aurora DR Solution are deleted. For example, all resources created by the CloudFormation should have the same tag. Then you can use Resources Groups & Tag Editor to confirm that all resources with the specified tag are deleted.
 
-### Uninstall the deployment for AWS Backup
+### Solution 2: Uninstall the deployment for AWS Backup
 
 To uninstall, you must delete 1/ All the [AWS Backup recovery points](https://docs.aws.amazon.com/aws-backup/latest/devguide/deleting-backups.html) and 2/ The AWS CloudFormation stacks that were created as a result of the AWS Backup solution. 
 
