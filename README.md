@@ -68,12 +68,12 @@ The solution’s disaster recovery option with AWS Backup provides the following
 │       └── AmazonAurora_GlobalDatabasae_DR_Solution.yaml
 ```
 
-## Solution 1: Deploying the solution with Amazon Aurora Global Database
+
+## Deploy the Guidance
+
+### Solution 1: Deploying the solution with Amazon Aurora Global Database
 
 Critical workloads with a global footprint, such as financial, travel, or gaming applications, have strict availability requirements and may need to tolerate a Region-wide outage. Traditionally, this required difficult tradeoffs between performance, availability, cost, and data integrity. Aurora Global Database uses storage-based replication with typical latency of less than 1 second, using dedicated infrastructure that leaves your database fully available to serve application workloads. In the unlikely event of a Regional degradation or outage, one of the secondary Regions can be promoted to read and write capabilities in less than 1 minute. In this solution we will be implementing Aurora Global database as a comprehensive Disaster recovery solution.
-
-
-### Deployment Guidance
 
 This solution will deploy resources using CloudFormation across two regions - The primary region (us-east-2) & The secondary region (us-west-2). 
 The primary region (Region A) already contains an Amazon Aurora Cluster that requires a disaster recovery implementation in the secondary region (Region B).
@@ -162,7 +162,7 @@ Validation of the Amazon Aurora Global database can be done by switching over th
 
 For details steps, review the implementation guide.
 
-## Solution 2: Deploying the solution with AWS Backup
+### Solution 2: Deploying the solution with AWS Backup
 
 As part of this solution, we will be implementing Cross-account, cross-region backup. However, depends on your RPO and RTO you can customize the parameters to meet your specific usecases such as Cross-account, same-region and Same-account, cross-region.
 
@@ -249,6 +249,7 @@ You can use the sample script to plug in the values for your AWS resources and k
 
 6. Once the backups are created and visible in the AWS Backup console of the target account under the `btest` backup vault, you can restore a new Aurora cluster using the backups in the central backup account. For detailed steps refer to [Restoring an Amazon Aurora cluster](https://docs.aws.amazon.com/aws-backup/latest/devguide/restoring-aur.html). Refer to the implementation guide for more details on this step. 
 
+## Uninstall the Guidance
 
 ### Soluiton 1: Uninstall the deployment for Amazon Aurora Global Database
 
