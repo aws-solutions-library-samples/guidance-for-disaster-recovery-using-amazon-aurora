@@ -4,7 +4,7 @@ AWS architecturally builds in safeguards against outages and incidents to minimi
 
 This guide provides a comprehensive overview of disaster recovery solutions for Amazon Aurora. It covers the reference architectures, planning considerations, and configuration steps for deploying disaster recovery on AWS. The guide targets Database Admins, DevOps Engineers, Solution Architects, Business leaders, and Cloud professionals aiming to implement Amazon Aurora disaster recovery. 
  
-### Architecture
+## Architecture
 
 This solution is built with two primary components: 
 1) **Comprehensive disaster recovery with Amazon Aurora Global Database:** Amazon Aurora Global Database, created by deploying the solution’s AWS CloudFormation template. As part of the solution, we will create a secondary region as part of the Aurora Global Database replication topology and other required services, such as AWS CloudWatch Dashboard for monitoring and AWS Lambda to customize Aurora Global Database swichover or failover to support the Disaster Recovery scenarios.
@@ -46,7 +46,7 @@ The solution’s disaster recovery option with AWS Backup provides the following
 9.	The backup of your Aurora cluster is now available in the central backup/ target account in Region B and is stored in the AWS Backup vault of Region B. The backup vault is encrypted with AWS KMS (CMK). This backup can be used to [restore](https://docs.aws.amazon.com/aws-backup/latest/devguide/restoring-aur.html) the Aurora database 
 
 
-### File Structure
+## File Structure
 
 ```
 ├── aurora-dr-solution
