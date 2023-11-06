@@ -764,7 +764,7 @@ Resources:
                 AlarmActions:
                     - !Ref AGDSNSTopic
                 InsufficientDataActions: []
-                MetricName: AuroraGlobalDBReplicationLag
+                MetricName: AuroraGlobalDBRPOLag
                 Namespace: AWS/RDS
                 Statistic: Average
                 Dimensions:
