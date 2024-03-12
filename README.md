@@ -1,37 +1,43 @@
-# Disaster Recovery Solutions for Amazon Aurora 
+# Guidance for Disaster Recovery Using Amazon Aurora
 
-AWS architecturally builds in safeguards against outages and incidents to minimize service disruptions. Disaster recovery capabilities are incorporated into AWS services to enable resilience when disruptions occur, reducing the impact to customers and service continuity. A key part of resilience is disaster recovery (DR) - the ability to respond to disastrous events that severely impact business operations. Effective DR relies on defined business objectives of Recovery Point Objective (RPO) to avoid data loss, and Recovery Time Objective (RTO) to reduce downtime. Workloads must be architected with resilience to meet RPO and RTO targets in a disaster scenario, enabling business continuity. This architectural approach maintains operations through an established Business Continuity Plan (BCP).
+Business continuity is the ability of the organization and all the supporting applications to run critical business functions at all times, including during emergency events. To achieve business continuity, you must implement various types of resilience mechanisms. Resilience is the ability of an application to recover from an outage, either automatically or with human intervention. This solution offers a solution for effectively planning and testing disaster recovery procedures on Amazon Aurora, encompassing industry best practices. It also presents a comprehensive business continuity plan (BCP) for structuring disaster recovery strategies specifically tailored to your Amazon Aurora clusters.
+
+A key part of resilience is disaster recovery (DR) - the ability to respond to unforeseen events that severely impact business operations. Effective DR relies on defined business objectives of Recovery Point Objective (RPO) to avoid data loss, and Recovery Time Objective (RTO) to reduce downtime. Workloads must be architected with resilience to meet RPO and RTO targets in a disaster scenario, enabling business continuity. This approach maintains operations through an established Business Continuity Plan (BCP).
 
 This guide provides a comprehensive overview of disaster recovery solutions for Amazon Aurora. It covers the reference architectures, planning considerations, and configuration steps for deploying disaster recovery on AWS. The guide targets Database Admins, DevOps Engineers, Solution Architects, Business leaders, and Cloud professionals aiming to implement Amazon Aurora disaster recovery. 
  
 ## Architecture
 
-This solution is built with two primary components: 
-1) **Comprehensive disaster recovery with Amazon Aurora Global Database:** Amazon Aurora Global Database, created by deploying the solution’s AWS CloudFormation template. As part of the solution, we will create a secondary region as part of the Aurora Global Database replication topology and other required services, such as AWS CloudWatch Dashboard for monitoring and AWS Lambda to customize Aurora Global Database swichover or failover to support the Disaster Recovery scenarios.
-2) **AWS Backup to centralize Aurora backups:** Use these templates to launch the Amazon Backup solution for your Amazon Aurora cluster. To demonstrate as part of the solution, we will be implementing Cross-account, cross-region backup. However, you can customize the parameters to meet your specific use cases such as Cross-account, same-region and Same-account, cross-region. 
+This guidance is built with two primary components: 
+1) **Comprehensive disaster recovery with Amazon Aurora Global Database:** Amazon Aurora Global Database, created by deploying the guidance's AWS CloudFormation template. As part of this guidance, we will create a secondary region as part of the Aurora Global Database replication topology and other required services, such as AWS CloudWatch Dashboard for monitoring and AWS Lambda to customize Aurora Global Database swichover or failover to support the Disaster Recovery scenarios.
+2) **AWS Backup to centralize Aurora backups:** Use these templates to launch the Amazon Backup solution for your Amazon Aurora cluster. To demonstrate as part of the guidance, we will be implementing Cross-account, cross-region backup. However, you can customize the parameters to meet your specific use cases such as Cross-account, same-region and Same-account, cross-region. 
 
 For more information refer to the implementation gudie. 
 
 ### Solution 1: Amazon Aurora Global Databases
 
-The solution’s disaster recovery option with Amazon Aurora Global Database provides the following components and workflows, which are shown as numbered steps in the following diagram.
+The disaster recovery option with Amazon Aurora Global Database provides the following components and workflows, which are shown as numbered steps in the following diagram.
 
 ![architecture-option-1](assets/aurora_global_database_arch.png)
 
-0.	An existing [Amazon Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html) Regional cluster is required to deploy this solution. The application can be running on the [Amazon EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html) instances, [Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html) or [Amazon ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) or any of your choice. In this solution we assume the application is deployed on EC2 instances across multiple availability zones. An Amazon Aurora cluster can be encrypted using default [Amazon KMS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.Keys.html) or using [customer managed key (CMK)](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.Keys.html).
-1.	Once the prerequisites are complete, the [AWS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/Welcome.html) stack provided as part of this guidance will create resources including [Amazon Aurora Read Replica](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-replicas-adding.html) in the Primary Region if not exists already, [Aurora Global Database](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database.html) with Reader instance in the Secondary Region. [Amazon CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Dashboard, [Amazon SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html) topic [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) function and [Amazon EventBridge](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html) rules are deployed in both the regions.
-2. & 2DR An Amazon CloudWatch Dashboard is configured in the Primary region and the Secondary region to monitor Amazon Aurora related key metrics along with replication status.
-3. & 3DR. An Amazon CloudWatch alarm is created in both the regions to generate an alarm for [AuroraGlobalDBRPOLag](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.AuroraMonitoring.Metrics.html#Aurora.AuroraMySQL.Monitoring.Metrics.clusters) metric and notify through an Amazon SNS topic.
-4. & 4DR. An Amazon EventBridge rule is configured for both planned switchovers and unplanned failover and notify through Amazon SNS topic when the event occurs and also calls Amazon Lambda function in both the regions.
-5. & 5DR. An AWS Lambda function provides a framework to add any additional functionalities during the [planned switchover](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-disaster-recovery.managed-failover) or [unplanned outage](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-failover) event. Some of the functionality can be, but not limited to 
-    1. Application can be configured to use [Amazon Route 53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) endpoint which could be pointing to the primary region. During the planned switchover or unplanned outage event, the Route53 endpoint can be updated to point to the newly promoted region. No application configuration is required during the planned switchover or unplanned outage event.
-    2. Application may require a restart after the database planned switchover or unplanned outage event. It depends on how the application is configured, it could be the restart of the EC2 instance or restart of the application deployment pods in the EKS cluster.
+1. Prerequisites: This Guidance requires an existing [Amazon Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraOverview.html) Regional cluster. The application can run on Amazon Elastic Compute Cloud (Amazon EC2), Amazon Elastic Kubernetes Service (Amazon EKS), Amazon Elastic Container Service [Amazon ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.htm), or another service of your choice. This Guidance assumes you have used Amazon EC2 instances in virtual private clouds (VPCs) across multiple Availability Zones (AZs). You can encrypt an Aurora cluster using the default Amazon Key Management Service [Amazon KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) or using a [customer-managed key (CMK)](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.Keys.html).
 
+2. [AWS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/Welcome.html) creates resources including [Amazon Aurora Read Replica](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-replicas-adding.html) in the Primary Region if one does not exist already, and an [Aurora Global Database](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database.html) with a reader instance in the secondary Region. An [Amazon CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Dashboard, an [Amazon SNS topic](https://docs.aws.amazon.com/sns/latest/dg/welcome.html), an [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) function, and [Amazon EventBridge](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html) rules are deployed in both the Regions.
 
+3. The CloudWatch dashboard is configured in the primary and secondary Regions to monitor key metrics related to Aurora, along with replication status.
+
+4. A CloudWatch alarm is created in both Regions to generate alarms for [AuroraGlobalDBReplicationLag](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.AuroraMonitoring.Metrics.html#Aurora.AuroraMySQL.Monitoring.Metrics.clusters) metrics and notifications through the Amazon SNS topic.
+
+5. An EventBridge rule is configured for planned switchovers and unplanned failovers. When an event occurs, it sends notifications using Amazon SNS and calls the Lambda functions in both Regions.
+
+6. The Lambda function provides a framework to add any additional functionalities during the [planned switchover](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-disaster-recovery.managed-failover) or [unplanned outage](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-failover) event. Some of the functionality can be, but not limited to:
+
+- You can configure the application to use an [Amazon Route 53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) in a newly promoted Region during a failover event so that no application configuration is required during the event.
+- You can configure the application to restart an Amazon EC2 instance or the application deployment pods in the Amazon EKS cluster after the database failover event.
 
 ### Solution 2: AWS Backup
 
-The solution’s disaster recovery option with AWS Backup provides the following components and workflows, which are shown as numbered steps in the following diagram.
+The Guidance’s disaster recovery option with [AWS Backup](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html) provides the following components and workflows, which are shown as numbered steps in the following diagram.
 
 ![architecture-option-2](assets/awsbackup_arch.png)
 
@@ -71,7 +77,7 @@ The solution’s disaster recovery option with AWS Backup provides the following
 
 ## Deploy the Guidance
 
-### Solution 1: Deploying the solution with Amazon Aurora Global Database
+### Solution 1: Amazon Aurora Global Database
 
 Critical workloads with a global footprint, such as financial, travel, or gaming applications, have strict availability requirements and may need to tolerate a Region-wide outage. Traditionally, this required difficult tradeoffs between performance, availability, cost, and data integrity. Aurora Global Database uses storage-based replication with typical latency of less than 1 second, using dedicated infrastructure that leaves your database fully available to serve application workloads. In the unlikely event of a Regional degradation or outage, one of the secondary Regions can be promoted to read and write capabilities in less than 1 minute. In this solution we will be implementing Aurora Global database as a comprehensive Disaster recovery solution.
 
@@ -93,7 +99,7 @@ The primary region (Region A) already contains an Amazon Aurora Cluster that req
 
 Clone this git repository.
 ```
-git clone https://gitlab.aws.dev/db-ssa/aurora-dr-solution.git
+git clone https://github.com/aws-solutions-library-samples/guidance-for-disaster-recovery-using-amazon-aurora
 ```
 
 #### 2. Create the CloudFormation stacks in the Primary Region A 
@@ -162,9 +168,9 @@ Validation of the Amazon Aurora Global database can be done by switching over th
 
 For details steps, review the implementation guide.
 
-### Solution 2: Deploying the solution with AWS Backup
+### Solution 2: AWS Backup
 
-As part of this solution, we will be implementing Cross-account, cross-region backup. However, depends on your RPO and RTO you can customize the parameters to meet your specific usecases such as Cross-account, same-region and Same-account, cross-region.
+As part of this guidance, we will be implementing Cross-account, cross-region backup. However, depends on your RPO and RTO you can customize the parameters to meet your specific usecases such as Cross-account, same-region and Same-account, cross-region.
 
 
 #### Prerequisites
@@ -191,7 +197,7 @@ For more details on the above prerequisites, refer to the implementation guide.
 # privileges to deploy cloudformation template in the AWS account that has OU configured
 # for source and target accounts
 
-git clone https://gitlab.aws.dev/db-ssa/aurora-dr-solution.git
+git clone https://github.com/aws-solutions-library-samples/guidance-for-disaster-recovery-using-amazon-aurora
 
 cd aurora_dr_solution
 
