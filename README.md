@@ -109,7 +109,7 @@ As a prerequisites, you create two CloudFormation stacks in the Production accou
 * **AWSCloudFormationStackSetAdministrationRole**
 * **AWSCloudFormationStackSetExecutionRole**
 
-The Cloudformation template files associated with the above role creations are [AWSCloudFormationStackSetAdministratonRole.yaml](/templates/AWSCloudFormationStackSetAdministrationRole.yaml) and [/templates/AWSCloudFormationStackSetExecutionRole.yaml](AWSCloudFormationStackSetExecutionRole.yaml)
+The Cloudformation template files associated with the above role creations are [AWSCloudFormationStackSetAdministratonRole.yaml](/templates/AWSCloudFormationStackSetAdministrationRole.yaml) and [AWSCloudFormationStackSetExecutionRole.yaml](/templates/AWSCloudFormationStackSetExecutionRole.yaml)
 
 #### 3. Run the CloudFormation stack in the Primary Region A
 
