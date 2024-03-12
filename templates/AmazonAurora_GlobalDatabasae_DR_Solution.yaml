@@ -17,7 +17,7 @@
 # *
 
 AWSTemplateFormatVersion: 2010-09-09
-Description: Deploying Aurora Global Database Cluster for Disaster Recovery Solution
+Description: Deploying Aurora Global Database Cluster for Disaster Recovery Solution - SO9408
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:

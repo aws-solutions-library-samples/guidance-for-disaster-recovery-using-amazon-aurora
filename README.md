@@ -109,13 +109,13 @@ As a prerequisites, you create two CloudFormation stacks in the Production accou
 * **AWSCloudFormationStackSetAdministrationRole**
 * **AWSCloudFormationStackSetExecutionRole**
 
-The Cloudformation template files associated with the above role creations are [AWSCloudFormationStackSetAdministratonRole.yml](AWSCloudFormationStackSetAdministrationRole.yml) and [AWSCloudFormationStackSetExecutionRole.yml](AWSCloudFormationStackSetExecutionRole.yml)
+The Cloudformation template files associated with the above role creations are [AWSCloudFormationStackSetAdministratonRole.yaml](/templates/AWSCloudFormationStackSetAdministrationRole.yaml) and [/templates/AWSCloudFormationStackSetExecutionRole.yaml](AWSCloudFormationStackSetExecutionRole.yaml)
 
 #### 3. Run the CloudFormation stack in the Primary Region A
 
 In this section, we will create the Aurora Global Database and other required services to support the Disaster recovery solution.
 
-Deploy the cloudformation template using the file [AmazonAurora_GlobalDatabasae_DR_Solution.yaml](AmazonAurora_GlobalDatabasae_DR_Solution.yaml) in the repository
+Deploy the cloudformation template using the file [AmazonAurora_GlobalDatabasae_DR_Solution.yaml](/templates/AmazonAurora_GlobalDatabasae_DR_Solution.yaml) in the repository
 
 Here the list of sample parameters along with the description
 
