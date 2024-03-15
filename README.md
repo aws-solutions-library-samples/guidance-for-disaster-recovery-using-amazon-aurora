@@ -9,10 +9,10 @@ This guide provides a comprehensive overview of disaster recovery solutions for 
 ## Architecture
 
 This guidance is built with two primary components: 
-1) **Comprehensive disaster recovery with Amazon Aurora Global Database:** Amazon Aurora Global Database, created by deploying the guidance's AWS CloudFormation template. As part of this guidance, we will create a secondary region as part of the Aurora Global Database replication topology and other required services, such as AWS CloudWatch Dashboard for monitoring and AWS Lambda to customize Aurora Global Database swichover or failover to support the Disaster Recovery scenarios.
+1) **Comprehensive disaster recovery with Amazon Aurora Global Database:** Amazon Aurora Global Database, created by deploying the guidance's AWS CloudFormation template. As part of this guidance, we will create a secondary region as part of the Aurora Global Database replication topology and other required services, such as AWS CloudWatch Dashboard for monitoring and AWS Lambda to customize Aurora Global Database switchover or failover to support the Disaster Recovery scenarios.
 2) **AWS Backup to centralize Aurora backups:** Use these templates to launch the Amazon Backup solution for your Amazon Aurora cluster. To demonstrate as part of the guidance, we will be implementing Cross-account, cross-region backup. However, you can customize the parameters to meet your specific use cases such as Cross-account, same-region and Same-account, cross-region. 
 
-For more information refer to the implementation gudie. 
+For more information refer to the implementation guide. 
 
 ### Solution 1: Amazon Aurora Global Databases
 
@@ -87,7 +87,7 @@ The primary region (Region A) already contains an Amazon Aurora Cluster that req
 #### Prerequisites
 
 1.	An existing Aurora MySQL or Aurora PostgreSQL cluster for which you would like to configure [Amazon Aurora Global Databases](https://aws.amazon.com/rds/aurora/global-database/). 
-2.	Amazon Aurora cluster can be configured with default  [AWS KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#kms_keys) or Customer Managed Key (CMK) for encryption or without storage level encryption. Currently solution supports all the above combination. However, highly recommend [encryption at rest](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.html) using either default [AWS KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) or [Customer managed key](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.Keys.html).
+2.	Amazon Aurora cluster can be configured with default  [AWS KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#kms_keys) or Customer Managed Key (CMK) for encryption or without storage level encryption. Currently this solution supports all the above combinations. However, we highly recommend [encryption at rest](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.html) using either default [AWS KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) or [Customer managed key](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Overview.Encryption.Keys.html).
 3.	Ensure that  `AWSCloudFormationStackSetAdministrationRole` role, and `AWSCloudFormationStackSetExecutionRole` role are created in the primary region where Aurora database cluster resides. For more information see [Grant self-managed permissions](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-prereqs-self-managed.html)
 4.	Install and  configure the latest version of the [AWS CLI (2.2.37 or newer)](https://aws.amazon.com/cli/) and Python 3.10 on the  machine you are going to use to interact with the solution. This can be  your personal laptop, an EC2 instance, Cloud9 or similar machine. Set up the AWS credentials for the user who is authenticated to set up the stacks in the Primary region. 
 
@@ -141,12 +141,12 @@ Once the CloudFormation stack is deployed successfully, it would have provisione
 
 * If the Amazon Aurora Cluster in the primary region is not already configured for Multi-AZ, this capability will be enabled as part of the CloudFormation stack deployment. This will create an Aurora reader instance in a different availability zone (AZ) from the writer instance, matching the writer configuration in terms of instance type and parameter group.
 * Creates a Global database with the name provided during the stack deployment.
-* Adds secondary region to the global database.
+* Adds a secondary region to the global database.
 * Adds a reader instance in the secondary region based on the configuration information provided during the stack deployment.
-* Creates CloudWatch dashboard with the predefined monitoring metrics.
-* Configures CloudWatch alarm for Aurora Global database replication lag.
+* Creates a CloudWatch dashboard with the predefined monitoring metrics.
+* Configures a CloudWatch alarm for Aurora Global database replication lag.
 * Provides Lambda functions to handle Global Database planned switchovers or unplanned outages.
-* Configures Amazon SNS notification to alert for CloudWatch Alarm and Global database planned switchovers/unplanned outage.
+* Configures an Amazon SNS notification to alert for CloudWatch Alarm and Global database planned switchovers/unplanned outage.
 
 
 #### 4. Monitor and test failover 
@@ -156,21 +156,21 @@ As part of the CloudFormation deployment, we have created the following services
 * CloudWatch Dashboard on both the regions 
 * Global ReplicationLag Alarm
 
-To monitor Aurora Global Database metrics.  Navigate to **CloudWatch Console** --→ Click on **Dashboard** in the AWS console. The CloudWatch dashboard calls custom lambda function to identify if the cluster is Primary or Secondary and requires a permission to execute.  Please click **Execute them all**. For more information refer to implementation guide 
+To monitor Aurora Global Database metrics.  Navigate to **CloudWatch Console** --→ Click on **Dashboard** in the AWS console. The CloudWatch dashboard calls a custom Lambda function to identify if the cluster is Primary or Secondary and requires a permission to execute.  Please click **Execute them all**. For more information refer to implementation guide 
 
-The deployment created sample Global ReplicationLag  metric alarm which will send email notification if the [AuroraGlobalDBRPOLag](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.AuroraMonitoring.Metrics.html#Aurora.AuroraMySQL.Monitoring.Metrics.clusters) is more than 600 sec (i.e., 10 minutes) and can be configurable.
+The deployment created a sample Global ReplicationLag  metric alarm which will send email notification if the [AuroraGlobalDBRPOLag](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.AuroraMonitoring.Metrics.html#Aurora.AuroraMySQL.Monitoring.Metrics.clusters) is more than 600 sec (i.e., 10 minutes) and can be configurable.
 
-Validation of the Amazon Aurora Global database can be done by switching over the cluster using [managed planned switchover](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-disaster-recovery.managed-failover) from the console. After completion of either a planned switchover or unplanned outage, the process will send an event to Eventbridge which in turn generate an email via SNS and execute the skeleton Lambda function code.
+Validation of the Amazon Aurora Global database can be done by switching over the cluster using [managed planned switchover](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html#aurora-global-database-disaster-recovery.managed-failover) from the console. After completion of either a planned switchover or unplanned outage, the process will send an event to Eventbridge which in turn generates an email via SNS and executes the skeleton Lambda function.
 
-**Note:** AWS Lambda function provides a framework to add any additional functionalities during the planned switchover or unplanned outage event. As a prescriptive guidance, we are providing the framework. You can leverage the AWS Lambda funciation to do 
-* Application can be configured to use [Amazon Route53 CNAME](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#CNAMEFormat) which could be pointing to the primary region. During the planned switchover or unplanned outage event, the Route53 endpoint can be updated to point to the newly promoted region. No application configuration is required during the planned switchover or unplanned outage event.
-* Application may require a restart after the database planned switchover or unplanned outage event. Depends on how the application is configured, it could be the restart of the EC2 instance or restart of the application deployment pods in the Amazon EKS cluster.
+**Note:** AWS Lambda function provides a framework to add any additional functionalities during the planned switchover or unplanned outage event. As a prescriptive guidance, we are providing the framework. You can leverage the AWS Lambda function to do 
+* The application can be configured to use [Amazon Route53 CNAME](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#CNAMEFormat) which could be pointing to the primary region. During the planned switchover or unplanned outage event, the Route53 endpoint can be updated to point to the newly promoted region. No application configuration is required during the planned switchover or unplanned outage event.
+* Application may require a restart after the database planned switchover or unplanned outage event. Depending on how the application is configured, it could be the restart of the EC2 instance or restart of the application deployment pods in the Amazon EKS cluster.
 
-For details steps, review the implementation guide.
+For detailed steps, review the implementation guide.
 
 ### Solution 2: AWS Backup
 
-As part of this guidance, we will be implementing Cross-account, cross-region backup. However, depends on your RPO and RTO you can customize the parameters to meet your specific usecases such as Cross-account, same-region and Same-account, cross-region.
+As part of this guidance, we will be implementing Cross-account, cross-region backup. However, depending on your RPO and RTO you can customize the parameters to meet your specific use cases such as cross-account, same-region and same-account, and cross-region.
 
 
 #### Prerequisites
@@ -257,14 +257,14 @@ You can use the sample script to plug in the values for your AWS resources and k
 
 ## Uninstall the Guidance
 
-### Soluiton 1: Uninstall the deployment for Amazon Aurora Global Database
+### Solution 1: Uninstall the deployment for Amazon Aurora Global Database
 
 To uninstall this solution, you must delete the AWS CloudFormation stack and any other stacks that were created as a result of the Aurora DR Solution. Because some AWS CloudFormation stacks use IAM roles created by previous stacks, you must delete AWS CloudFormation stacks in the reverse order they were created (delete the most recent stack first, wait for the stack deletion to be completed, and then delete the next stack). 
 
 #### 1. Using the AWS Management Console 
 
 * Sign in to the AWS CloudFormation console
-* Select the following solutions stack one at a time and Delete it. Please make sure the Primary Region is same as when the deployment started. In this example it is us-east-2
+* Select the following solutions stack one at a time and Delete it. Please make sure the Primary Region is the same as when the deployment started. In this example it is us-east-2.
     * AuroraGlobalDatabaseSolution
     * AWSCloudFormationStackSetAdministrationRole
     * AWSCloudFormationStackSetExecutionRole
@@ -278,13 +278,13 @@ To uninstall this solution, you must delete the AWS CloudFormation stack and any
 $ aws cloudformation delete-stack --stack-name <installation-stack-name>
 ```
 
-Deleting the CloudFormation stack, deletes all the resources provisioned as part of the deployment. It is recommended that you use tags to ensure that all resources associated with Amazon Aurora DR Solution are deleted. For example, all resources created by the CloudFormation should have the same tag. Then you can use Resources Groups & Tag Editor to confirm that all resources with the specified tag are deleted.
+Deleting the CloudFormation stack, deletes all the resources provisioned as part of the deployment. It is recommended that you use tags to ensure that all resources associated with Amazon Aurora DR Solution are deleted. For example, all resources created by CloudFormation should have the same tag. Then you can use Resources Groups & Tag Editor to confirm that all resources with the specified tag are deleted.
 
 ### Solution 2: Uninstall the deployment for AWS Backup
 
 To uninstall, you must delete 1/ All the [AWS Backup recovery points](https://docs.aws.amazon.com/aws-backup/latest/devguide/deleting-backups.html) and 2/ The AWS CloudFormation stacks that were created as a result of the AWS Backup solution. 
 
-In order to so, you can run the below steps on your AWS CLI terminal with the user role that has the correct administrator privileges.
+In order to do so, you can run the below steps on your AWS CLI terminal with the user role that has the correct administrator privileges.
  
 **Note:** 
 * To run below scripts, make sure you are in the correct directory where you cloned the git repository.
@@ -303,7 +303,7 @@ pBackupVaultName="btest"; export pBackupVaultName
  done
 ```
 
-Up on running the above script across source and target accounts, deletes all recovery points from the backup vaults. 
+Upon running the above script across source and target accounts, it deletes all recovery points from the backup vaults. 
 
 2. Run the below script in the Production OU/ source account in the primary region. This script deletes all the three StackSets which were created in the source Production OU account and source region. 
 
@@ -331,7 +331,7 @@ aws cloudformation delete-stack --stack-name AWSCloudFormationStackSetExecutionR
 
 You can also perform this step from the AWS console. For detailed steps to delete a stack, refer to [Deleting a stack on the AWS CloudFormation console](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-delete-stack.html).
  
-With the above steps, you have successfully uninstalled the AWS Backup solution. For more information refer to implementation guide.
+With the above steps, you have successfully uninstalled the AWS Backup solution. For more information refer to the implementation guide.
 
 ---
 ### License
